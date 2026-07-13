@@ -1,0 +1,22 @@
+<!-- home-navigation.component.html -->
+<div class="home-container">
+  <h1>🛡️ Sistema de Gestión de Riesgos</h1>
+
+  <div class="navigation-cards">
+    <button class="nav-card map-card" (click)="goToMap()">
+      <div class="icon">🗺️</div>
+      <h2>Mapa de Riesgos</h2>
+      <p>Visualiza riesgos en tu ubicación y crea reportes georreferenciados</p>
+    </button>
+
+    <button class="nav-card form-card" (click)="goToForm()">
+      <div class="icon"></div>
+      <h2>Crear Reporte</h2>
+      <p>Reporta riesgos manualmente o con asistente de voz</p>
+    </button>
+  </div>
+
+  <div class="stats-summary" *ngIf="hasPendingReports">
+    <p>📋 Tienes {{ pendingCount }} reporte(s) pendiente(s) de sincronización</p>
+  </div>
+</div>

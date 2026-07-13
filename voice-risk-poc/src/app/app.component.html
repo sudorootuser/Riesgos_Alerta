@@ -1,0 +1,122 @@
+<div class="container">
+  <h1>🎙️ Sistema de Reporte de Riesgos</h1>
+
+  <div class="status-indicator" [class.online]="isOnline" [class.offline]="!isOnline">
+    {{ isOnline ? '🟢 Conectado a Internet' : '🔴 Sin Conexión (Modo Offline)' }}
+  </div>
+
+  <div class="card">
+    <!-- ================= FLUJO ONLINE (VOZ) ================= -->
+    <div *ngIf="isOnline" class="flow-section">
+      <!-- ... (Tu código de voz se mantiene igual) ... -->
+      <h2>Reporte por Voz</h2>
+      <div class="voice-controls">
+        <button *ngIf="!isListening" class="btn-primary" (click)="startListening()">🎤 Iniciar Grabación</button>
+        <button *ngIf="isListening" class="btn-danger" (click)="stopListening()">⏹️ Detener Grabación</button>
+      </div>
+      <div *ngIf="showConfirmation" class="preview-box">
+        <p><strong>Texto capturado:</strong></p>
+        <p class="transcript-text">"{{ transcript }}"</p>
+        <div class="action-buttons">
+          <button class="btn-success" (click)="confirmAndSend()">✅ Enviar al Sistema</button>
+          <button class="btn-secondary" (click)="cancelVoiceInput()">❌ Cancelar</button>
+        </div>
+      </div>
+      <div *ngIf="isListening" class="listening-indicator">Escuchando... habla claramente.</div>
+    </div>
+
+    <!-- ================= FLUJO OFFLINE (MANUAL) ================= -->
+    <div *ngIf="!isOnline" class="flow-section">
+      <h2>Reporte Manual (Sin Conexión)</h2>
+      <p class="helper-text">No hay conexión a internet. Escribe el reporte y guárdalo localmente.</p>
+
+      <!-- 🆕 Indicador visual si estamos editando -->
+      <p *ngIf="editingAlertId" class="editing-indicator">✏️ Editando alerta guardada...</p>
+
+      <textarea class="manual-input" [(ngModel)]="manualText"
+        placeholder="Ej: Hay un riesgo de deslizamiento en Cali, nivel alto..." rows="4"></textarea>
+
+      <button class="btn-primary" (click)="saveOfflineAlert()" [disabled]="!manualText.trim()">
+        {{ editingAlertId ? '💾 Actualizar Alerta' : '💾 Guardar en Local' }}
+      </button>
+
+      <button *ngIf="editingAlertId" class="btn-secondary" (click)="editingAlertId = null; manualText = ''"
+        style="margin-left: 10px;">
+        Cancelar Edición
+      </button>
+    </div>
+
+    <!-- 🆕 ================= TABLA DE ALERTAS PENDIENTES ================= -->
+    <!-- Se muestra siempre que haya alertas en el array, sin importar si hay internet o no -->
+    <div *ngIf="offlineAlerts.length > 0" class="pending-alerts-section">
+      <h3>📋 Alertas Guardadas Localmente ({{ offlineAlerts.length }})</h3>
+      <p class="helper-text">Estas alertas se enviarán automáticamente al recuperar la conexión, o puedes enviarlas
+        manualmente.</p>
+
+      <div class="table-responsive">
+        <table class="pending-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Contenido</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let alert of offlineAlerts" [class.row-error]="alert.status === 'error'">
+              <td>{{ alert.timestamp }}</td>
+              <td class="text-content">{{ alert.text }}</td>
+              <td>
+                <span class="badge-status" [ngClass]="{
+                  'status-pending': alert.status === 'pendiente',
+                  'status-sending': alert.status === 'enviando',
+                  'status-error': alert.status === 'error'
+                }">
+                  {{ alert.status === 'pendiente' ? '⏳ Pendiente' : (alert.status === 'enviando' ? '🔄 Enviando...' : '❌
+                  Error') }}
+                </span>
+              </td>
+              <td class="actions-cell">
+                <!-- Botón Enviar Individual -->
+                <button class="btn-action btn-send" (click)="sendSingleAlert(alert)"
+                  [disabled]="alert.status === 'enviando' || isOnline === false" title="Enviar al servidor">
+                  📤
+                </button>
+
+                <!-- Botón Editar -->
+                <button class="btn-action btn-edit" (click)="editOfflineAlert(alert)" title="Editar">
+                  ✏️
+                </button>
+
+                <!-- Botón Borrar -->
+                <button class="btn-action btn-delete" (click)="deleteOfflineAlert(alert.id)" title="Borrar">
+                  🗑️
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <!-- ====================================================================== -->
+
+    <!-- ================= MENSAJES DE ERROR / ÉXITO ================= -->
+    <div *ngIf="errorMessage" class="message-box"
+      [class.error]="errorMessage.includes('Error') || errorMessage.includes('❌')"
+      [class.success]="errorMessage.includes('✅') || errorMessage.includes('Sincronizando')">
+      {{ errorMessage }}
+    </div>
+
+    <!-- ================= RESULTADO DEL ENDPOINT ================= -->
+    <div *ngIf="result" class="result-box">
+      <!-- ... (Tu código de resultado se mantiene igual) ... -->
+      <h2>📊 Resultado del Análisis</h2>
+      <div class="result-item"><strong>Título:</strong> {{ result.title }}</div>
+      <div class="result-item"><strong>Tipo:</strong> <span class="badge">{{ result.risk_type }}</span></div>
+      <div class="result-item"><strong>Nivel:</strong> <span
+          class="badge level-{{ result.risk_level.toLowerCase() }}">{{ result.risk_level }}</span></div>
+      <div class="result-item"><strong>Descripción:</strong> {{ result.description }}</div>
+    </div>
+  </div>
+</div>
