@@ -4,6 +4,66 @@ export interface Coordinates {
   lng: number;
 }
 
+export interface RiskEvidence {
+  id: string;
+  risk_report_id: string;
+  evidence_type_id: string; // 'PHOTO' | 'VIDEO' | 'AUDIO' | 'DOCUMENT'
+  file_name: string;
+  file_url: string; // Base64
+  mime_type: string;
+  file_size: number; // en bytes
+  captured_date: string;
+  latitude: number;
+  longitude: number;
+}
+
+export const EVIDENCE_TYPE_CATALOG = {
+  PHOTO: { id: 'ev-001', code: 'PHOTO', name: 'Fotografía', accept: 'image/*', icon: '📷' },
+  VIDEO: { id: 'ev-002', code: 'VIDEO', name: 'Video', accept: 'video/*', icon: '🎥' },
+  AUDIO: { id: 'ev-003', code: 'AUDIO', name: 'Audio', accept: 'audio/*', icon: '🎵' },
+  DOCUMENT: {
+    id: 'ev-004',
+    code: 'DOCUMENT',
+    name: 'Documento',
+    accept: '.pdf,.doc,.docx,.txt',
+    icon: '📄',
+  },
+};
+
+// Actualiza RiskReport para incluir los nuevos campos
+export interface RiskReport {
+  id: string;
+  risk_type_id: string;
+  risk_status_id: string;
+  risk_level_id: string;
+  risk_type_reporter_id: string;
+  risk_type_coordinate_id: string;
+
+  title: string;
+  description: string;
+  latitude: number;
+  longitude: number;
+  jsonCoordinate: CoordinatePoint[];
+  direccion: string;
+  audio_url?: string;
+
+  user_name: string;
+  report_date: string;
+  evidences: RiskEvidence[];
+
+  created_at: string;
+  updated_at?: string;
+  sync_status: 'pending' | 'synced' | 'error' | 'retry_ia';
+  backend_response?: any;
+
+  ia_process?: {
+    original_audio?: string;
+    transcript: string;
+    ia_response?: any;
+    retry_count: number;
+  };
+}
+
 // Para la estructura de la base de datos (jsonCoordinate)
 export interface CoordinatePoint {
   latitude: number;
@@ -17,7 +77,6 @@ export interface RiskReport {
   risk_level_id: string;
   risk_type_reporter_id: string;
   risk_type_coordinate_id: string;
-
   title: string;
   description: string;
   latitude: number;
@@ -26,46 +85,14 @@ export interface RiskReport {
   direccion: string;
   audio_url?: string;
 
-  user: string;
-  date: string;
+  user_name: string; // <-- Nota: es user_name, NO user
+  report_date: string; // <-- Nota: es report_date, NO date
+  evidences: RiskEvidence[];
 
   created_at: string;
   updated_at?: string;
   sync_status: 'pending' | 'synced' | 'error' | 'retry_ia';
   backend_response?: any;
-
-  ia_process?: {
-    original_audio?: string;
-    transcript: string;
-    ia_response?: any;
-    retry_count: number;
-  };
-}
-
-export interface RiskReport {
-  id: string;
-  risk_type_id: string;
-  risk_status_id: string;
-  risk_level_id: string;
-  risk_type_reporter_id: string;
-  risk_type_coordinate_id: string;
-
-  title: string;
-  description: string;
-  latitude: number;
-  longitude: number;
-  jsonCoordinate: CoordinatePoint[];
-  direccion: string;
-  audio_url?: string;
-
-  user: string;
-  date: string;
-
-  created_at: string;
-  updated_at?: string;
-  sync_status: 'pending' | 'synced' | 'error' | 'retry_ia';
-  backend_response?: any;
-
   ia_process?: {
     original_audio?: string;
     transcript: string;
@@ -76,7 +103,7 @@ export interface RiskReport {
 
 export interface DrawingState {
   mode: 'point' | 'polygon' | null;
-  tempPoints: CoordinatePoint[]; 
+  tempPoints: CoordinatePoint[];
 }
 
 // =====================================================
@@ -134,3 +161,8 @@ export const RISK_COORDINATE_CATALOG = {
   POINT: { id: 'coord-001', code: 'POINT', name: 'Punto' },
   POLYGON: { id: 'coord-002', code: 'POLYGON', name: 'Polígono' },
 };
+
+export interface DrawingState {
+  mode: 'point' | 'polygon' | null;
+  tempPoints: CoordinatePoint[];
+}

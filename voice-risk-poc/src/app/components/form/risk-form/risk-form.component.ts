@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -15,6 +15,8 @@ import {
   RISK_STATUS_CATALOG,
   RISK_REPORTER_CATALOG,
   RISK_COORDINATE_CATALOG,
+  RiskEvidence,
+  EVIDENCE_TYPE_CATALOG,
 } from '../../interfaces/risk.models';
 
 interface RiskResponse {
@@ -27,14 +29,14 @@ interface RiskResponse {
 }
 
 type FormMode = 'selection' | 'manual' | 'voice';
-type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
+type ManualStep = 'data' | 'evidences';
+type VoiceStep = 'idle' | 'listening' | 'processing' | 'result' | 'evidences';
 
 @Component({
   selector: 'app-risk-form',
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <!-- (Mantén tu template HTML exactamente igual, no cambia) -->
     <div class="form-container">
       <div class="form-header">
         <button class="btn-back" (click)="goBack()">
@@ -74,12 +76,12 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
         </div>
       </div>
 
-      <!-- MODO MANUAL -->
-      <div *ngIf="mode === 'manual'" class="form-card fade-in">
+      <!-- MODO MANUAL: PASO 1 -->
+      <div *ngIf="mode === 'manual' && manualStep === 'data'" class="form-card fade-in">
         <div class="location-info" *ngIf="coordinates">
           <span>📍 {{ address || 'Obteniendo ubicación...' }}</span>
         </div>
-        <form (ngSubmit)="submitManualReport()" class="risk-form">
+        <form (ngSubmit)="goToEvidencesStep()" class="risk-form">
           <div class="form-group">
             <label>Tipo de Riesgo *</label>
             <select [(ngModel)]="formData.risk_type" name="risk_type" required>
@@ -122,91 +124,129 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
               required
             ></textarea>
           </div>
-          <button type="submit" class="btn-submit" [disabled]="isSubmitting || !isFormValid()">
-            {{
-              isSubmitting
-                ? 'Procesando...'
-                : isOnline
-                  ? '📤 Enviar Reporte'
-                  : '💾 Guardar Localmente'
-            }}
+          <button type="submit" class="btn-submit" [disabled]="!isFormValid()">
+            Siguiente: Adjuntar Evidencias ➡️
           </button>
         </form>
       </div>
 
-      <!-- MODO VOZ (IA) -->
+      <!-- MODO VOZ -->
       <div *ngIf="mode === 'voice'" class="voice-container fade-in">
-        <div *ngIf="voiceState === 'idle'" class="voice-state idle">
-          <div class="mic-icon-large">🎙️</div>
-          <h3>Asistente de Voz Activo</h3>
-          <p>Presiona el botón y describe el riesgo con tus propias palabras.</p>
-          <button class="btn-start-voice" (click)="startVoiceRecognition()">
-            <span class="pulse-ring"></span>
-            Comenzar a Hablar
-          </button>
-        </div>
-
-        <div *ngIf="voiceState === 'listening'" class="voice-state listening">
-          <div class="listening-animation">
+        <div *ngIf="voiceStep === 'idle' || voiceStep === 'listening'" class="voice-state">
+          <div *ngIf="voiceStep === 'idle'" class="mic-icon-large">🎙️</div>
+          <div *ngIf="voiceStep === 'listening'" class="listening-animation">
             <div class="wave"></div>
             <div class="wave"></div>
             <div class="wave"></div>
           </div>
-          <h3>Escuchando y Grabando...</h3>
-          <p>Habla claro y describe la ubicación y el problema.</p>
-          <button class="btn-stop-voice" (click)="stopVoiceRecognition()">
+          <h3>
+            {{ voiceStep === 'idle' ? 'Asistente de Voz Activo' : 'Escuchando y Grabando...' }}
+          </h3>
+          <p>
+            {{
+              voiceStep === 'idle'
+                ? 'Presiona el botón y describe el riesgo.'
+                : 'Habla claro y describe la ubicación y el problema.'
+            }}
+          </p>
+
+          <button
+            *ngIf="voiceStep === 'idle'"
+            class="btn-start-voice"
+            (click)="startVoiceRecognition()"
+          >
+            <span class="pulse-ring"></span> Comenzar a Hablar
+          </button>
+          <button
+            *ngIf="voiceStep === 'listening'"
+            class="btn-stop-voice"
+            (click)="stopVoiceRecognition()"
+          >
             ⏹️ Detener Grabación
           </button>
         </div>
 
-        <div *ngIf="voiceState === 'processing'" class="voice-state processing">
+        <div *ngIf="voiceStep === 'processing'" class="voice-state">
           <div class="spinner"></div>
           <h3>Procesando audio con IA...</h3>
         </div>
 
-        <div *ngIf="voiceState === 'result'" class="voice-state result">
-          <h3>✅ Texto Capturado</h3>
+        <div *ngIf="voiceStep === 'result'" class="voice-state result">
+          <h3>✅ Análisis de IA Completado</h3>
           <div class="transcript-box">
-            <p>"{{ transcript }}"</p>
+            <p><strong>Resumen IA:</strong> {{ iaResult?.report_summary || transcript }}</p>
+            <p><strong>Tipo detectado:</strong> {{ iaResult?.risk_type || 'No especificado' }}</p>
+            <p><strong>Nivel detectado:</strong> {{ iaResult?.risk_level || 'No especificado' }}</p>
           </div>
           <div class="voice-actions">
             <button class="btn-cancel" (click)="resetVoice()">❌ Descartar</button>
-            <button class="btn-confirm" (click)="submitVoiceReport()" [disabled]="isSubmitting">
-              {{ isSubmitting ? 'Enviando...' : '✅ Confirmar y Enviar' }}
+            <button class="btn-confirm" (click)="goToEvidencesStep()">
+              ➡️ Siguiente: Evidencias
             </button>
           </div>
         </div>
+      </div>
 
-        <div
-          *ngIf="errorMessage"
-          class="message-box"
-          [class.error]="errorMessage.includes('Error')"
-          [class.success]="errorMessage.includes('✅')"
-        >
-          {{ errorMessage }}
+      <!-- PASO DE EVIDENCIAS (COMÚN) -->
+      <div
+        *ngIf="
+          (mode === 'manual' && manualStep === 'evidences') ||
+          (mode === 'voice' && voiceStep === 'evidences')
+        "
+        class="form-card fade-in"
+      >
+        <h3>📎 Adjuntar Evidencias</h3>
+        <p class="helper-text">
+          Agrega fotos, videos, audios o documentos. El audio de la IA se adjunta automáticamente
+          por separado.
+        </p>
+
+        <div class="evidence-buttons">
+          <button class="ev-btn photo" (click)="triggerFileInput('PHOTO')">📷 Fotografía</button>
+          <button class="ev-btn video" (click)="triggerFileInput('VIDEO')">🎥 Video</button>
+          <button class="ev-btn audio" (click)="triggerFileInput('AUDIO')">🎵 Audio</button>
+          <button class="ev-btn doc" (click)="triggerFileInput('DOCUMENT')">📄 Documento</button>
+        </div>
+
+        <input
+          type="file"
+          #fileInput
+          hidden
+          [accept]="currentAcceptType"
+          (change)="onFileSelected($event)"
+        />
+
+        <div class="evidence-list" *ngIf="currentEvidences.length > 0">
+          <h4>Evidencias agregadas ({{ currentEvidences.length }})</h4>
+          <div *ngFor="let ev of currentEvidences; let i = index" class="evidence-item">
+            <span class="ev-icon">{{ getEvidenceIcon(ev.evidence_type_id) }}</span>
+            <div class="ev-details">
+              <span class="ev-name">{{ ev.file_name }}</span>
+              <span class="ev-size">{{ (ev.file_size / 1024).toFixed(1) }} KB</span>
+            </div>
+            <button class="btn-delete-ev" (click)="removeEvidence(i)" title="Eliminar">🗑️</button>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn-secondary" (click)="goBackToDataStep()">⬅️ Volver</button>
+          <button class="btn-submit" (click)="finalizeAndSave()" [disabled]="isSubmitting">
+            {{ isSubmitting ? 'Guardando...' : '✅ Finalizar y Guardar Reporte' }}
+          </button>
         </div>
       </div>
 
-      <!-- Resultado del Backend (Compartido) -->
-      <div *ngIf="backendResult" class="result-box fade-in">
-        <h3>📊 Análisis del Sistema</h3>
-        <div class="result-item"><strong>Título:</strong> {{ backendResult.title }}</div>
-        <div class="result-item">
-          <strong>Tipo:</strong> <span class="badge">{{ backendResult.risk_type }}</span>
-        </div>
-        <div class="result-item">
-          <strong>Nivel:</strong>
-          <span class="badge level-{{ backendResult.risk_level.toLowerCase() }}">{{
-            backendResult.risk_level
-          }}</span>
-        </div>
-        <div class="result-item"><strong>Resumen:</strong> {{ backendResult.report_summary }}</div>
-        <button class="btn-submit" (click)="resetAll()">Crear Otro Reporte</button>
+      <div
+        *ngIf="errorMessage"
+        class="message-box"
+        [class.error]="errorMessage.includes('Error') || errorMessage.includes('❌')"
+        [class.success]="errorMessage.includes('✅')"
+      >
+        {{ errorMessage }}
       </div>
     </div>
   `,
   styles: [
-    /* (Mantén tus estilos CSS exactos aquí, no cambian) */
     `
       .form-container {
         max-width: 700px;
@@ -229,18 +269,11 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
         display: flex;
         align-items: center;
         gap: 6px;
-        transition: all 0.2s;
       }
       .btn-back:hover {
         background: #f8fafc;
         color: #2563eb;
         transform: translateX(-3px);
-      }
-      .form-header h1 {
-        flex: 1;
-        margin: 0;
-        font-size: 1.5rem;
-        color: #1e293b;
       }
       .status-badge {
         padding: 6px 12px;
@@ -272,8 +305,8 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
         padding: 2rem;
         background: white;
         cursor: pointer;
-        transition: all 0.3s;
         text-align: center;
+        transition: all 0.3s;
       }
       .mode-card:hover:not(:disabled) {
         border-color: #3b82f6;
@@ -288,15 +321,6 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
       .mode-card .icon {
         font-size: 3rem;
         margin-bottom: 1rem;
-      }
-      .mode-card h4 {
-        margin: 0 0 0.5rem 0;
-        color: #1e293b;
-      }
-      .mode-card p {
-        margin: 0;
-        color: #64748b;
-        font-size: 14px;
       }
       .offline-warning {
         color: #ef4444 !important;
@@ -337,7 +361,6 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
         border: 1px solid #cbd5e1;
         border-radius: 8px;
         font-size: 15px;
-        font-family: inherit;
         box-sizing: border-box;
       }
       .form-group input:focus,
@@ -362,6 +385,106 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
       .btn-submit:disabled {
         opacity: 0.6;
         cursor: not-allowed;
+      }
+      .btn-secondary {
+        width: 100%;
+        padding: 1rem;
+        background: #f1f5f9;
+        color: #475569;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 1rem;
+      }
+      .helper-text {
+        font-size: 14px;
+        color: #64748b;
+        margin-bottom: 1.5rem;
+      }
+      .evidence-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      .ev-btn {
+        padding: 1rem;
+        border: 2px dashed #cbd5e1;
+        border-radius: 12px;
+        background: #f8fafc;
+        cursor: pointer;
+        font-weight: 600;
+        color: #475569;
+        transition: all 0.2s;
+        font-size: 15px;
+      }
+      .ev-btn:hover {
+        border-color: #3b82f6;
+        background: #eff6ff;
+        color: #2563eb;
+      }
+      .evidence-list {
+        margin-top: 1.5rem;
+        border-top: 1px solid #e2e8f0;
+        padding-top: 1rem;
+      }
+      .evidence-list h4 {
+        font-size: 14px;
+        color: #475569;
+        margin-bottom: 0.75rem;
+      }
+      .evidence-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 8px;
+      }
+      .ev-icon {
+        font-size: 20px;
+      }
+      .ev-details {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      .ev-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: #334155;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ev-size {
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      .btn-delete-ev {
+        background: #fee2e2;
+        color: #ef4444;
+        border: none;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      .btn-delete-ev:hover {
+        background: #fecaca;
+      }
+      .form-actions {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1.5rem;
+      }
+      .form-actions button {
+        flex: 1;
+        margin-top: 0;
       }
       .voice-container {
         background: white;
@@ -401,7 +524,7 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
         height: 100%;
         border-radius: 50px;
         border: 3px solid #ef4444;
-        animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        animation: pulse-ring 1.5s infinite;
       }
       @keyframes pulse-ring {
         0% {
@@ -471,15 +594,15 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
         }
       }
       .transcript-box {
-        background: #f8fafc;
-        border: 2px solid #e2e8f0;
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
         border-radius: 12px;
         padding: 1.5rem;
         margin: 1rem 0;
         text-align: left;
-        font-size: 16px;
+        font-size: 14px;
         line-height: 1.6;
-        color: #334155;
+        color: #166534;
         width: 100%;
         box-sizing: border-box;
       }
@@ -509,42 +632,6 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
         font-weight: 600;
         cursor: pointer;
         font-size: 16px;
-      }
-      .btn-confirm:disabled {
-        opacity: 0.6;
-      }
-      .result-box {
-        margin-top: 2rem;
-        padding: 1.5rem;
-        background: #f0fdf4;
-        border-radius: 12px;
-        border: 1px solid #bbf7d0;
-        text-align: left;
-      }
-      .result-item {
-        margin-bottom: 0.75rem;
-      }
-      .badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 9999px;
-        font-size: 13px;
-        font-weight: 700;
-        background: #e2e8f0;
-        color: #475569;
-      }
-      .level-alto,
-      .level-crítico {
-        background: #fecaca;
-        color: #991b1b;
-      }
-      .level-medio {
-        background: #fef08a;
-        color: #854d0e;
-      }
-      .level-bajo {
-        background: #bbf7d0;
-        color: #166534;
       }
       .message-box {
         margin-top: 1rem;
@@ -576,7 +663,8 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
         }
       }
       @media (max-width: 600px) {
-        .mode-cards {
+        .mode-cards,
+        .evidence-buttons {
           grid-template-columns: 1fr;
         }
       }
@@ -584,20 +672,28 @@ type VoiceState = 'idle' | 'listening' | 'processing' | 'result';
   ],
 })
 export class RiskFormComponent implements OnInit, OnDestroy {
+  @ViewChild('fileInput') fileInput!: ElementRef<HTMLInputElement>; // <-- AGREGAR ESTA LÍNEA
+
   isOnline = true;
   isSubmitting = false;
   errorMessage = '';
   backendResult: RiskResponse | null = null;
 
   mode: FormMode = 'selection';
-  voiceState: VoiceState = 'idle';
+  manualStep: ManualStep = 'data';
+  voiceStep: VoiceStep = 'idle';
+
   transcript = '';
   capturedAudioBase64 = '';
+  iaResult: RiskResponse | null = null; // <-- AGREGAR
 
   coordinates: { lat: number; lng: number } | null = null;
   address = '';
 
   formData = { risk_type: '', risk_level: '', title: '', description: '' };
+
+  currentEvidences: RiskEvidence[] = [];
+  currentAcceptType = '*/*';
 
   private recognition: any;
   private connectivityInterval: any;
@@ -663,12 +759,140 @@ export class RiskFormComponent implements OnInit, OnDestroy {
   setMode(newMode: FormMode) {
     if (newMode === 'voice' && !this.isOnline) return;
     this.mode = newMode;
+    this.manualStep = 'data';
+    this.voiceStep = 'idle';
     this.errorMessage = '';
     this.backendResult = null;
+    this.currentEvidences = [];
+  }
+
+  goToEvidencesStep() {
+    if (this.mode === 'manual') this.manualStep = 'evidences';
+    else if (this.mode === 'voice') this.voiceStep = 'evidences';
+  }
+
+  goBackToDataStep() {
+    if (this.mode === 'manual') this.manualStep = 'data';
+    else if (this.mode === 'voice') this.voiceStep = 'result';
+  }
+
+  triggerFileInput(type: keyof typeof EVIDENCE_TYPE_CATALOG) {
+    this.currentAcceptType = EVIDENCE_TYPE_CATALOG[type].accept;
+    setTimeout(() => this.fileInput.nativeElement.click(), 0);
   }
 
   goBack() {
     this.navService.navigateTo('home');
+  }
+
+  async onFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+
+    const file = input.files[0];
+    const coords = this.coordinates || { lat: 0, lng: 0 };
+
+    try {
+      const base64 = await this.fileToBase64(file);
+      let evType = 'DOCUMENT';
+      if (file.type.startsWith('image/')) evType = 'PHOTO';
+      else if (file.type.startsWith('video/')) evType = 'VIDEO';
+      else if (file.type.startsWith('audio/')) evType = 'AUDIO';
+
+      const newEvidence: RiskEvidence = {
+        id: crypto.randomUUID(),
+        risk_report_id: 'pending',
+        evidence_type_id: EVIDENCE_TYPE_CATALOG[evType as keyof typeof EVIDENCE_TYPE_CATALOG].id,
+        file_name: file.name,
+        file_url: base64,
+        mime_type: file.type,
+        file_size: file.size,
+        captured_date: new Date().toISOString(),
+        latitude: coords.lat,
+        longitude: coords.lng,
+      };
+
+      this.currentEvidences.push(newEvidence);
+      this.notificationService.success('✅ Evidencia agregada', file.name);
+    } catch (error) {
+      this.notificationService.error('❌ Error', 'No se pudo procesar el archivo.');
+    }
+    input.value = ''; // Limpiar para permitir seleccionar el mismo archivo de nuevo
+  }
+
+  private fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  }
+
+  removeEvidence(index: number) {
+    this.currentEvidences.splice(index, 1);
+  }
+
+  getEvidenceIcon(evTypeId: string): string {
+    const type = Object.values(EVIDENCE_TYPE_CATALOG).find((t) => t.id === evTypeId);
+    return type ? type.icon : '📄';
+  }
+
+  // 🆕 REEMPLAZA submitVoiceReport y submitManualReport por este único método unificado:
+  async finalizeAndSave() {
+    this.isSubmitting = true;
+    try {
+      const isIA = this.mode === 'voice';
+      let backendResponse = isIA ? this.iaResult : null;
+
+      // Si es manual y hay internet, obtenemos la respuesta de la IA ahora
+      if (!isIA && this.isOnline) {
+        const payload = {
+          message: { text: this.formData.description, type: 'text' },
+          risk_type: this.formData.risk_type,
+          risk_level: this.formData.risk_level,
+        };
+        const url =
+          'https://min-ai-dev-dev-n8n-main.happypebble-84155d3f.eastus2.azurecontainerapps.io/webhook/risk-ai';
+        const headers = new HttpHeaders({
+          Authentication: 'Bearer apsd8jfa8p98rj3p239jklds',
+          'Content-Type': 'application/json',
+        });
+        backendResponse = await firstValueFrom(this.http.post<any>(url, payload, { headers }));
+      }
+
+      await this.saveReportToStorage({
+        isIA,
+        transcript: this.transcript,
+        audioBase64: this.capturedAudioBase64,
+        backendResponse,
+        status: this.isOnline ? 'synced' : 'pending',
+        evidences: this.currentEvidences,
+      });
+
+      this.notificationService.success(
+        '✅ Reporte Guardado',
+        'El reporte y sus evidencias se guardaron exitosamente.',
+      );
+      this.navService.navigateTo('home');
+    } catch (error) {
+      console.error('❌ Error finalizando reporte:', error);
+      await this.saveReportToStorage({
+        isIA: this.mode === 'voice',
+        transcript: this.transcript,
+        audioBase64: this.capturedAudioBase64,
+        backendResponse: null,
+        status: this.mode === 'voice' ? 'retry_ia' : 'error',
+        evidences: this.currentEvidences,
+      });
+      this.notificationService.error(
+        '❌ Error de Red',
+        'Se guardó localmente para intentar más tarde.',
+      );
+      this.navService.navigateTo('home');
+    } finally {
+      this.isSubmitting = false;
+    }
   }
 
   // --- LÓGICA DE VOZ ACTUALIZADA ---
@@ -686,10 +910,10 @@ export class RiskFormComponent implements OnInit, OnDestroy {
       };
       this.recognition.onerror = (event: any) => {
         this.errorMessage = 'Error en el reconocimiento: ' + event.error;
-        this.voiceState = 'idle';
+        this.voiceStep = 'idle';
       };
       this.recognition.onend = () => {
-        if (this.voiceState === 'listening') this.voiceState = 'idle';
+        if (this.voiceStep === 'listening') this.voiceStep = 'idle';
       };
     } else {
       this.errorMessage = 'Tu navegador no soporta la API de voz.';
@@ -700,7 +924,7 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     this.errorMessage = '';
     this.transcript = '';
     this.capturedAudioBase64 = '';
-    this.voiceState = 'listening';
+    this.voiceStep = 'listening';
 
     try {
       // 1. Iniciar grabación de audio real (para IndexedDB)
@@ -709,7 +933,7 @@ export class RiskFormComponent implements OnInit, OnDestroy {
       if (this.recognition) this.recognition.start();
     } catch (e) {
       this.errorMessage = 'No se pudo acceder al micrófono.';
-      this.voiceState = 'idle';
+      this.voiceStep = 'idle';
     }
   }
 
@@ -730,75 +954,23 @@ export class RiskFormComponent implements OnInit, OnDestroy {
         this.capturedAudioBase64.substring(0, 50) + '...',
       );
 
-      this.voiceState = 'processing';
+      this.voiceStep = 'processing';
 
       setTimeout(() => {
-        this.voiceState = 'result';
+        this.voiceStep = 'result';
       }, 1500);
     } catch (e) {
       console.error('❌ [IA] Error al procesar el audio:', e);
       this.errorMessage = 'Error al procesar el audio.';
-      this.voiceState = 'idle';
+      this.voiceStep = 'idle';
     }
   }
 
   resetVoice() {
-    this.voiceState = 'idle';
+    this.voiceStep = 'idle';
     this.transcript = '';
     this.capturedAudioBase64 = '';
     this.errorMessage = '';
-  }
-
-  async submitVoiceReport() {
-    this.isSubmitting = true;
-    console.log('📝 [IA] Iniciando envío de reporte de voz...');
-    try {
-      const payload = { message: { text: this.transcript, type: 'text' } };
-      const url =
-        'https://min-ai-dev-dev-n8n-main.happypebble-84155d3f.eastus2.azurecontainerapps.io/webhook/risk-ai';
-      const headers = new HttpHeaders({
-        Authentication: 'Bearer apsd8jfa8p98rj3p239jklds',
-        'Content-Type': 'application/json',
-      });
-
-      const response = await firstValueFrom(this.http.post<any>(url, payload, { headers }));
-      console.log('✅ [IA] Respuesta del backend:', response);
-
-      await this.saveReportToStorage({
-        isIA: true,
-        transcript: this.transcript,
-        audioBase64: this.capturedAudioBase64,
-        backendResponse: response,
-        status: 'synced',
-      });
-
-      this.backendResult = response;
-      this.notificationService.success(
-        '✅ Reporte Enviado',
-        'El reporte fue procesado exitosamente',
-      );
-      this.mode = 'selection';
-    } catch (error) {
-      console.error('❌ [IA] ERROR al enviar a IA, guardando para reintento:', error);
-
-      await this.saveReportToStorage({
-        isIA: true,
-        transcript: this.transcript,
-        audioBase64: this.capturedAudioBase64,
-        backendResponse: null,
-        status: 'retry_ia',
-      });
-
-      this.notificationService.info(
-        '💾 Guardado para Reintento IA',
-        'Se procesará con IA cuando haya conexión',
-      );
-      setTimeout(() => {
-        this.mode = 'selection';
-      }, 2000);
-    } finally {
-      this.isSubmitting = false;
-    }
   }
 
   // --- LÓGICA MANUAL ---
@@ -811,107 +983,6 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     );
   }
 
-  async submitManualReport() {
-    this.isSubmitting = true;
-    console.log('📝 [MANUAL] Iniciando envío de reporte manual...');
-    console.log('📍 Coordenadas actuales:', this.coordinates);
-    console.log('🏠 Dirección:', this.address);
-    console.log('📋 Datos del formulario:', this.formData);
-
-    try {
-      // Si no hay coordenadas, intentamos obtenerlas una última vez antes de guardar
-      let coordsToSave = this.coordinates;
-      let addressToSave = this.address;
-
-      if (!coordsToSave) {
-        console.warn('⚠️ [MANUAL] No hay coordenadas, intentando obtenerlas...');
-        try {
-          coordsToSave = await this.geoService.getCurrentPosition();
-          const geoData = await this.geoService.getAddressFromCoords(
-            coordsToSave.lat,
-            coordsToSave.lng,
-          );
-          addressToSave = `${geoData.comuna}, ${geoData.barrio} - ${geoData.address}`;
-        } catch (geoError) {
-          console.error('❌ [MANUAL] No se pudo obtener la ubicación:', geoError);
-          coordsToSave = { lat: 0, lng: 0 };
-          addressToSave = 'Ubicación no disponible';
-        }
-      }
-
-      if (this.isOnline) {
-        const payload = {
-          message: { text: this.formData.description, type: 'text' },
-          risk_type: this.formData.risk_type,
-          risk_level: this.formData.risk_level,
-        };
-        const url =
-          'https://min-ai-dev-dev-n8n-main.happypebble-84155d3f.eastus2.azurecontainerapps.io/webhook/risk-ai';
-        const headers = new HttpHeaders({
-          Authentication: 'Bearer apsd8jfa8p98rj3p239jklds',
-          'Content-Type': 'application/json',
-        });
-
-        console.log('📤 [MANUAL] Enviando petición al backend...');
-        const response = await firstValueFrom(this.http.post<any>(url, payload, { headers }));
-        console.log('✅ [MANUAL] Respuesta del backend:', response);
-
-        await this.saveReportToStorage({
-          isIA: false,
-          transcript: '',
-          backendResponse: response,
-          status: 'synced',
-          coordsOverride: coordsToSave,
-          addressOverride: addressToSave,
-        });
-
-        this.backendResult = response;
-        this.notificationService.success(
-          '✅ Reporte Enviado',
-          'El reporte fue procesado exitosamente',
-        );
-      } else {
-        console.log('💾 [MANUAL] Sin conexión. Guardando localmente...');
-        await this.saveReportToStorage({
-          isIA: false,
-          transcript: '',
-          backendResponse: null,
-          status: 'pending',
-          coordsOverride: coordsToSave,
-          addressOverride: addressToSave,
-        });
-        this.notificationService.info(
-          '💾 Guardado Localmente',
-          'Se enviará automáticamente cuando haya conexión',
-        );
-      }
-      this.resetForm();
-    } catch (error) {
-      console.error('❌ [MANUAL] ERROR DETALLADO al enviar/guardar:', error);
-
-      // Intentar guardar localmente incluso si falló todo lo demás
-      try {
-        await this.saveReportToStorage({
-          isIA: false,
-          transcript: '',
-          backendResponse: null,
-          status: 'error',
-          coordsOverride: this.coordinates || { lat: 0, lng: 0 },
-          addressOverride: this.address || 'Error al obtener dirección',
-        });
-      } catch (saveError) {
-        console.error('❌ [MANUAL] FALLO CRÍTICO al guardar en IndexedDB:', saveError);
-      }
-
-      this.notificationService.error(
-        '❌ Error',
-        'No se pudo enviar el reporte. Se guardó localmente.',
-      );
-    } finally {
-      this.isSubmitting = false;
-    }
-  }
-
   // --- MÉTODO UNIFICADO DE GUARDADO ---
   private async saveReportToStorage(data: {
     isIA: boolean;
@@ -919,82 +990,52 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     audioBase64?: string;
     backendResponse: any;
     status: 'synced' | 'pending' | 'error' | 'retry_ia';
-    coordsOverride?: { lat: number; lng: number };
-    addressOverride?: string;
+    evidences: RiskEvidence[];
   }) {
     const rawRiskType = data.backendResponse?.risk_type || this.formData.risk_type;
     const rawRiskLevel = data.backendResponse?.risk_level || this.formData.risk_level;
 
     const riskTypeKey = this.getRiskTypeKey(rawRiskType);
     const riskLevelKey = this.getRiskLevelKey(rawRiskLevel);
-
-    // Usar coordenadas sobrescritas (del intento de rescate) o las de la clase
-    const coords = data.coordsOverride || this.coordinates || { lat: 0, lng: 0 };
-    const address = data.addressOverride || this.address || 'Dirección no disponible';
+    const coords = this.coordinates || { lat: 0, lng: 0 };
 
     const newReport: RiskReport = {
-      id: this.generateUUID(),
-      risk_type_id: RISK_TYPE_CATALOG[riskTypeKey].id,
+      id: crypto.randomUUID(),
+      risk_type_id: RISK_TYPE_CATALOG[this.getRiskTypeKey(rawRiskType)].id,
       risk_status_id: RISK_STATUS_CATALOG.REPORTED.id,
-      risk_level_id: RISK_LEVEL_CATALOG[riskLevelKey].id,
+      risk_level_id: RISK_LEVEL_CATALOG[this.getRiskLevelKey(rawRiskLevel)].id,
       risk_type_reporter_id: data.isIA
         ? RISK_REPORTER_CATALOG.ASSISTANT.id
         : RISK_REPORTER_CATALOG.FORM.id,
       risk_type_coordinate_id: RISK_COORDINATE_CATALOG.POINT.id,
-
       title: data.backendResponse?.title || this.formData.title || 'Reporte de Riesgo',
       description:
         data.backendResponse?.description || this.formData.description || data.transcript,
       latitude: coords.lat,
       longitude: coords.lng,
       jsonCoordinate: [{ latitude: coords.lat, longitude: coords.lng }],
-      direccion: address,
-
-      user: 'user-demo-001',
-      date: new Date().toISOString(),
+      direccion: this.address || 'Dirección no disponible',
+      user_name: 'Técnico Demo',
+      report_date: new Date().toISOString(),
+      evidences: data.evidences,
+      audio_url: data.isIA ? data.audioBase64 : undefined,
       created_at: new Date().toISOString(),
-
       sync_status: data.status,
       backend_response: data.backendResponse,
+      ia_process: data.isIA
+        ? {
+            original_audio: data.audioBase64,
+            transcript: data.transcript,
+            ia_response: data.backendResponse,
+            retry_count: data.status === 'retry_ia' ? 1 : 0,
+          }
+        : undefined,
     };
 
-    if (data.isIA) {
-      newReport.audio_url = data.audioBase64;
-      newReport.ia_process = {
-        original_audio: data.audioBase64,
-        transcript: data.transcript,
-        ia_response: data.backendResponse,
-        retry_count: data.status === 'retry_ia' ? 1 : 0,
-      };
-    }
-
-    // 🆕 LOG CLAVE: Mostrar el JSON exacto que se va a guardar en IndexedDB
-    console.log(
-      '💾 [STORAGE] JSON FINAL a guardar en IndexedDB:',
-      JSON.parse(JSON.stringify(newReport)),
-    );
-
-    try {
-      await this.storageService.saveReport(newReport);
-      console.log('✅ [STORAGE] Reporte guardado exitosamente en IndexedDB.');
-    } catch (storageError) {
-      console.error('❌ [STORAGE] Error crítico al guardar en IndexedDB:', storageError);
-      throw storageError;
-    }
+    await this.storageService.saveReport(newReport);
   }
 
   // --- UTILIDADES ---
-  private generateUUID(): string {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-      const r = (Math.random() * 16) | 0,
-        v = c === 'x' ? r : (r & 0x3) | 0x8;
-      return v.toString(16) + Date.now().toString(16);
-    });
-  }
-
   private getRiskTypeKey(name: string): keyof typeof RISK_TYPE_CATALOG {
     if (!name) return 'INVASION_TERRITORIAL';
     const normalizedName = name.trim().toLowerCase();

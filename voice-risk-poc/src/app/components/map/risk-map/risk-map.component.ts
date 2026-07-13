@@ -10,6 +10,9 @@ import {
   DrawingState,
   RiskReport,
   RISK_LEVEL_CATALOG,
+  EVIDENCE_TYPE_CATALOG,
+  RISK_TYPE_CATALOG,
+  RiskEvidence,
 } from '../../interfaces/risk.models';
 import { NavigationService } from '../../../services/navigation.service';
 
@@ -68,6 +71,141 @@ import { NavigationService } from '../../../services/navigation.service';
         <button class="btn-primary-large" (click)="goToFormWithLocation()">
           + Crear Reporte en esta ubicación
         </button>
+      </div>
+
+      <!-- Modal de Detalles del Reporte -->
+      <div class="modal-overlay" *ngIf="selectedReport" (click)="closeModal()">
+        <div class="modal-content" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <div class="modal-title-section">
+              <h3 class="modal-title">{{ selectedReport.title }}</h3>
+              <span
+                class="modal-badge"
+                [style.background-color]="getRiskColor(selectedReport.risk_level_id)"
+              >
+                {{ getRiskLevelName(selectedReport.risk_level_id) }}
+              </span>
+            </div>
+            <button class="modal-close" (click)="closeModal()">✕</button>
+          </div>
+
+          <div class="modal-body">
+            <!-- Información General -->
+            <div class="info-section">
+              <div class="info-row">
+                <span class="info-label">📋 Tipo de Riesgo:</span>
+                <span class="info-value">{{ getRiskTypeName(selectedReport.risk_type_id) }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">📍 Dirección:</span>
+                <span class="info-value">{{ selectedReport.direccion }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">👤 Usuario:</span>
+                <span class="info-value">{{ selectedReport.user_name }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">📅 Fecha:</span>
+                <span class="info-value">{{ selectedReport.report_date | date: 'medium' }}</span>
+              </div>
+            </div>
+
+            <!-- Descripción -->
+            <div class="description-section">
+              <h4>📝 Descripción</h4>
+              <p class="description-text">{{ selectedReport.description }}</p>
+            </div>
+
+            <!-- Audio Principal (si existe) -->
+            <div class="audio-section" *ngIf="selectedReport.audio_url">
+              <h4>🎙️ Audio del Reporte</h4>
+              <audio controls class="modal-audio">
+                <source [src]="selectedReport.audio_url" type="audio/webm" />
+                Tu navegador no soporta audio.
+              </audio>
+            </div>
+
+            <!-- Evidencias -->
+            <div
+              class="evidences-section"
+              *ngIf="selectedReport.evidences && selectedReport.evidences.length > 0"
+            >
+              <h4>📎 Evidencias Adjuntas ({{ selectedReport.evidences.length }})</h4>
+              <div class="evidences-grid">
+                <div
+                  *ngFor="let ev of selectedReport.evidences"
+                  class="evidence-card"
+                  (click)="openEvidence(ev)"
+                >
+                  <div class="evidence-icon">{{ getEvidenceIcon(ev.evidence_type_id) }}</div>
+                  <div class="evidence-info">
+                    <span class="evidence-name">{{ ev.file_name }}</span>
+                    <span class="evidence-size">{{ (ev.file_size / 1024).toFixed(1) }} KB</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn-tts" (click)="speakReport()">🔊 Leer Resumen</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal de Visualización de Evidencia -->
+      <div class="evidence-modal-overlay" *ngIf="selectedEvidence" (click)="closeEvidenceModal()">
+        <div class="evidence-modal-content" (click)="$event.stopPropagation()">
+          <button class="evidence-modal-close" (click)="closeEvidenceModal()">✕</button>
+
+          <!-- Imagen -->
+          <img
+            *ngIf="selectedEvidence.mime_type.startsWith('image/')"
+            [src]="selectedEvidence.file_url"
+            class="evidence-full-image"
+          />
+
+          <!-- Video -->
+          <video
+            *ngIf="selectedEvidence.mime_type.startsWith('video/')"
+            controls
+            class="evidence-full-video"
+          >
+            <source [src]="selectedEvidence.file_url" [type]="selectedEvidence.mime_type" />
+          </video>
+
+          <!-- Audio -->
+          <div
+            *ngIf="selectedEvidence.mime_type.startsWith('audio/')"
+            class="evidence-audio-container"
+          >
+            <h3>🎵 {{ selectedEvidence.file_name }}</h3>
+            <audio controls class="evidence-full-audio">
+              <source [src]="selectedEvidence.file_url" [type]="selectedEvidence.mime_type" />
+            </audio>
+          </div>
+
+          <!-- Documento -->
+          <div
+            *ngIf="
+              !selectedEvidence.mime_type.startsWith('image/') &&
+              !selectedEvidence.mime_type.startsWith('video/') &&
+              !selectedEvidence.mime_type.startsWith('audio/')
+            "
+            class="evidence-document"
+          >
+            <div class="document-icon">📄</div>
+            <h3>{{ selectedEvidence.file_name }}</h3>
+            <p>Tipo: {{ selectedEvidence.mime_type }}</p>
+            <a
+              [href]="selectedEvidence.file_url"
+              [download]="selectedEvidence.file_name"
+              class="btn-download"
+            >
+              ⬇️ Descargar
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   `,
@@ -132,6 +270,11 @@ import { NavigationService } from '../../../services/navigation.service';
         font-weight: bold;
         cursor: pointer;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        transition: all 0.2s;
+      }
+      .float-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
       }
       .point-btn {
         background: #2196f3;
@@ -196,80 +339,304 @@ import { NavigationService } from '../../../services/navigation.service';
         transform: scale(1.05);
       }
 
-      /* ESTILOS PARA LA TARJETA DEL POPUP */
-      .risk-popup-card {
-        font-family: 'Segoe UI', system-ui, sans-serif;
-        min-width: 250px;
+      /* Modal de Detalles */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+        animation: fadeIn 0.2s ease;
       }
-      .popup-header {
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      .modal-content {
+        background: white;
+        border-radius: 16px;
+        width: 90%;
+        max-width: 600px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        animation: slideUp 0.3s ease;
+      }
+      @keyframes slideUp {
+        from {
+          transform: translateY(30px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      .modal-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid #e2e8f0;
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        border-bottom: 1px solid #e2e8f0;
-        padding-bottom: 8px;
-        margin-bottom: 8px;
+        align-items: flex-start;
+        position: sticky;
+        top: 0;
+        background: white;
+        z-index: 10;
       }
-      .popup-title {
-        font-size: 15px;
-        font-weight: 700;
+      .modal-title-section {
+        flex: 1;
+      }
+      .modal-title {
+        margin: 0 0 0.5rem 0;
+        font-size: 1.5rem;
         color: #1e293b;
-        margin: 0;
       }
-      .popup-badge {
-        padding: 3px 8px;
+      .modal-badge {
+        display: inline-block;
+        padding: 4px 12px;
         border-radius: 12px;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 700;
         color: white;
       }
-      .popup-body {
-        margin-bottom: 8px;
-      }
-      .popup-summary {
-        font-size: 13px;
-        color: #475569;
-        line-height: 1.4;
-        margin: 0 0 8px 0;
-      }
-      .popup-address {
-        font-size: 12px;
+      .modal-close {
+        background: #f1f5f9;
+        border: none;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 18px;
         color: #64748b;
+        transition: all 0.2s;
+      }
+      .modal-close:hover {
+        background: #e2e8f0;
+        color: #1e293b;
+      }
+
+      .modal-body {
+        padding: 1.5rem;
+      }
+      .info-section {
+        margin-bottom: 1.5rem;
+      }
+      .info-row {
+        display: flex;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid #f1f5f9;
+      }
+      .info-label {
+        font-weight: 600;
+        color: #64748b;
+        min-width: 140px;
+      }
+      .info-value {
+        color: #1e293b;
+        flex: 1;
+      }
+
+      .description-section {
+        margin-bottom: 1.5rem;
+      }
+      .description-section h4 {
+        margin: 0 0 0.75rem 0;
+        color: #475569;
+        font-size: 1rem;
+      }
+      .description-text {
+        color: #334155;
+        line-height: 1.6;
         margin: 0;
+      }
+
+      .audio-section {
+        margin-bottom: 1.5rem;
+      }
+      .audio-section h4 {
+        margin: 0 0 0.75rem 0;
+        color: #475569;
+        font-size: 1rem;
+      }
+      .modal-audio {
+        width: 100%;
+        border-radius: 8px;
+      }
+
+      .evidences-section h4 {
+        margin: 0 0 1rem 0;
+        color: #475569;
+        font-size: 1rem;
+      }
+      .evidences-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+      }
+      .evidence-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1rem;
+        cursor: pointer;
+        transition: all 0.2s;
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 0.75rem;
+      }
+      .evidence-card:hover {
+        background: #eff6ff;
+        border-color: #3b82f6;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+      }
+      .evidence-icon {
+        font-size: 2rem;
+      }
+      .evidence-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .evidence-name {
+        font-weight: 600;
+        color: #1e293b;
+        font-size: 0.9rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .evidence-size {
+        font-size: 0.75rem;
+        color: #64748b;
       }
 
-      /* Reproductor de audio nativo estilizado */
-      .popup-audio {
-        width: 100%;
-        margin-top: 8px;
-        border-radius: 6px;
+      .modal-footer {
+        padding: 1rem 1.5rem;
+        border-top: 1px solid #e2e8f0;
+        display: flex;
+        justify-content: flex-end;
+        position: sticky;
+        bottom: 0;
+        background: white;
       }
-
-      .popup-footer {
-        margin-top: 8px;
-        text-align: right;
-        border-top: 1px solid #f1f5f9;
-        padding-top: 8px;
-      }
-      .popup-tts-btn {
-        background: #f1f5f9;
-        color: #475569;
+      .btn-tts {
+        background: #3b82f6;
+        color: white;
         border: none;
-        padding: 6px 12px;
-        border-radius: 6px;
-        font-size: 12px;
+        padding: 10px 20px;
+        border-radius: 8px;
         font-weight: 600;
         cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        transition: background 0.2s;
+        transition: all 0.2s;
       }
-      .popup-tts-btn:hover {
-        background: #e2e8f0;
-        color: #2563eb;
+      .btn-tts:hover {
+        background: #2563eb;
+        transform: translateY(-1px);
+      }
+
+      /* Modal de Evidencia */
+      .evidence-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+        animation: fadeIn 0.2s ease;
+      }
+      .evidence-modal-content {
+        position: relative;
+        max-width: 90%;
+        max-height: 90vh;
+        background: white;
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .evidence-modal-close {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        background: rgba(255, 255, 255, 0.9);
+        border: none;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 20px;
+        color: #1e293b;
+        z-index: 10;
+        transition: all 0.2s;
+      }
+      .evidence-modal-close:hover {
+        background: white;
+        transform: scale(1.1);
+      }
+      .evidence-full-image {
+        max-width: 100%;
+        max-height: 90vh;
+        display: block;
+      }
+      .evidence-full-video {
+        max-width: 100%;
+        max-height: 90vh;
+        display: block;
+      }
+      .evidence-audio-container {
+        padding: 3rem;
+        text-align: center;
+      }
+      .evidence-audio-container h3 {
+        margin: 0 0 1.5rem 0;
+        color: #1e293b;
+      }
+      .evidence-full-audio {
+        width: 100%;
+        max-width: 500px;
+      }
+      .evidence-document {
+        padding: 3rem;
+        text-align: center;
+      }
+      .document-icon {
+        font-size: 5rem;
+        margin-bottom: 1rem;
+      }
+      .evidence-document h3 {
+        margin: 0 0 0.5rem 0;
+        color: #1e293b;
+      }
+      .evidence-document p {
+        color: #64748b;
+        margin: 0 0 1.5rem 0;
+      }
+      .btn-download {
+        display: inline-block;
+        background: #3b82f6;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 600;
+        transition: all 0.2s;
+      }
+      .btn-download:hover {
+        background: #2563eb;
+        transform: translateY(-2px);
       }
     `,
   ],
@@ -280,7 +647,10 @@ export class RiskMapComponent implements OnInit, AfterViewInit, OnDestroy {
   isDrawing = false;
   drawingState: DrawingState = { mode: null, tempPoints: [] };
   capturedLocation: Coordinates | null = null;
+  selectedReport: RiskReport | null = null;
+  selectedEvidence: RiskEvidence | null = null;
   private mapClickHandler!: L.LeafletEventHandlerFn;
+  private mapLayers: L.Layer[] = [];
 
   constructor(
     private navService: NavigationService,
@@ -331,79 +701,89 @@ export class RiskMapComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private renderMarkers() {
-    // Limpiar marcadores anteriores (excepto el de ubicación del usuario)
-    this.map.eachLayer((layer) => {
-      if (layer instanceof L.Marker || layer instanceof L.CircleMarker) {
-        if (
-          (layer as any)._popup &&
-          (layer as any)._popup._content &&
-          !(layer as any)._icon?.className?.includes('user-location-pin')
-        ) {
-          this.map.removeLayer(layer);
-        }
-      }
-    });
+    // Limpiar capas anteriores
+    this.mapLayers.forEach((layer) => this.map.removeLayer(layer));
+    this.mapLayers = [];
 
     this.reports.forEach((report) => {
       const levelName = this.getRiskLevelName(report.risk_level_id);
-      const color =
-        levelName === 'Alto' || levelName === 'Crítico'
-          ? '#ef4444'
-          : levelName === 'Medio'
-            ? '#f59e0b'
-            : '#10b981';
+      const color = this.getRiskColor(report.risk_level_id);
 
-      const marker = L.circleMarker([report.latitude, report.longitude], {
-        radius: 10,
-        fillColor: color,
-        color: '#ffffff',
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.9,
-      }).addTo(this.map);
+      // Verificar si es polígono o punto
+      if (report.risk_type_coordinate_id === 'coord-002' && report.jsonCoordinate.length >= 3) {
+        // Es un polígono - dibujar área rellena
+        const latLngs = report.jsonCoordinate.map(
+          (p) => [p.latitude, p.longitude] as L.LatLngTuple,
+        );
+        const polygon = L.polygon(latLngs, {
+          color: color,
+          fillColor: color,
+          fillOpacity: 0.4,
+          weight: 3,
+        }).addTo(this.map);
 
-      // 🆕 LÓGICA CONDICIONAL PARA EL AUDIO
-      const hasAudio = !!report.audio_url;
-      const audioPlayerHtml = hasAudio
-        ? `<audio controls class="popup-audio"><source src="${report.audio_url}" type="audio/webm">Tu navegador no soporta audio.</audio>`
-        : '';
+        polygon.on('click', () => this.openModal(report));
+        this.mapLayers.push(polygon);
+      } else {
+        // Es un punto - dibujar marcador
+        const marker = L.circleMarker([report.latitude, report.longitude], {
+          radius: 12,
+          fillColor: color,
+          color: '#ffffff',
+          weight: 3,
+          opacity: 1,
+          fillOpacity: 0.9,
+        }).addTo(this.map);
 
-      const summaryText =
-        report.backend_response?.report_summary ||
-        report.description.substring(0, 100) + (report.description.length > 100 ? '...' : '');
-      const safeSummary = summaryText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-      const safeTitle = report.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-      // 🆕 PLANTILLA HTML TIPO CARD
-      const popupContent = `
-        <div class="risk-popup-card">
-          <div class="popup-header">
-            <p class="popup-title">${report.title}</p>
-            <span class="popup-badge" style="background-color: ${color};">${levelName}</span>
-          </div>
-          <div class="popup-body">
-            <p class="popup-summary">${summaryText}</p>
-            <p class="popup-address">📍 ${report.direccion}</p>
-            ${audioPlayerHtml}
-          </div>
-          <div class="popup-footer">
-            <button class="popup-tts-btn" onclick="window.speakText('${safeTitle}. ${safeSummary}')">
-              🔊 Leer Resumen
-            </button>
-          </div>
-        </div>
-      `;
-
-      marker.bindPopup(popupContent);
-
-      // Hack para exponer la función de TTS al popup HTML
-      (window as any).speakText = (text: string) => this.ttsService.speak(text);
+        marker.on('click', () => this.openModal(report));
+        this.mapLayers.push(marker);
+      }
     });
   }
 
-  private getRiskLevelName(levelId: string): string {
+  openModal(report: RiskReport) {
+    this.selectedReport = report;
+  }
+
+  closeModal() {
+    this.selectedReport = null;
+  }
+
+  openEvidence(evidence: RiskEvidence) {
+    this.selectedEvidence = evidence;
+  }
+
+  closeEvidenceModal() {
+    this.selectedEvidence = null;
+  }
+
+  speakReport() {
+    if (this.selectedReport) {
+      const text = `${this.selectedReport.title}. ${this.selectedReport.description}`;
+      this.ttsService.speak(text);
+    }
+  }
+
+  protected getRiskLevelName(levelId: string): string {
     const level = Object.values(RISK_LEVEL_CATALOG).find((l) => l.id === levelId);
     return level ? level.name : 'Desconocido';
+  }
+
+  protected getRiskTypeName(typeId: string): string {
+    const type = Object.values(RISK_TYPE_CATALOG).find((t) => t.id === typeId);
+    return type ? type.name : 'Desconocido';
+  }
+
+  protected getRiskColor(levelId: string): string {
+    const levelName = this.getRiskLevelName(levelId);
+    if (levelName === 'Alto' || levelName === 'Crítico') return '#ef4444';
+    if (levelName === 'Medio') return '#f59e0b';
+    return '#10b981';
+  }
+
+  protected getEvidenceIcon(typeId: string): string {
+    const type = Object.values(EVIDENCE_TYPE_CATALOG).find((t) => t.id === typeId);
+    return type ? type.icon : '📄';
   }
 
   startDrawing(mode: 'point' | 'polygon') {
@@ -422,34 +802,76 @@ export class RiskMapComponent implements OnInit, AfterViewInit, OnDestroy {
       this.capturedLocation = { lat: point.latitude, lng: point.longitude };
       this.cancelDrawing();
     } else {
-      L.circleMarker([point.latitude, point.longitude], { radius: 4, color: 'blue' }).addTo(
-        this.map,
-      );
+      // Dibujar punto temporal para polígono
+      const marker = L.circleMarker([point.latitude, point.longitude], {
+        radius: 6,
+        color: '#ff9800',
+        fillColor: '#ff9800',
+        fillOpacity: 1,
+      }).addTo(this.map);
+      this.mapLayers.push(marker);
+
+      // Si hay más de un punto, dibujar línea
+      if (this.drawingState.tempPoints.length > 1) {
+        const prevPoint = this.drawingState.tempPoints[this.drawingState.tempPoints.length - 2];
+        const line = L.polyline(
+          [
+            [prevPoint.latitude, prevPoint.longitude],
+            [point.latitude, point.longitude],
+          ],
+          {
+            color: '#ff9800',
+            weight: 3,
+            opacity: 0.7,
+            dashArray: '5, 10',
+          },
+        ).addTo(this.map);
+        this.mapLayers.push(line);
+      }
     }
   }
 
   finishPolygon() {
     if (this.drawingState.tempPoints.length >= 3) {
-      const firstPoint = this.drawingState.tempPoints[0];
-      this.capturedLocation = { lat: firstPoint.latitude, lng: firstPoint.longitude };
+      // Guardar todos los puntos del polígono
+      this.capturedLocation = {
+        lat: this.drawingState.tempPoints[0].latitude,
+        lng: this.drawingState.tempPoints[0].longitude,
+      };
+
+      // Navegar al formulario con todos los puntos
+      this.navService.navigateTo('form', {
+        coords: this.capturedLocation,
+        polygon: this.drawingState.tempPoints,
+        coordinateType: 'POLYGON',
+      });
+
       this.cancelDrawing();
     }
   }
 
   goToFormWithLocation() {
     if (this.capturedLocation) {
-      this.navService.navigateTo('form', { coords: this.capturedLocation });
+      this.navService.navigateTo('form', {
+        coords: this.capturedLocation,
+        coordinateType: 'POINT',
+      });
     }
   }
 
   cancelDrawing() {
     this.isDrawing = false;
     this.drawingState = { mode: null, tempPoints: [] };
-    this.map.eachLayer((layer) => {
-      if (layer instanceof L.CircleMarker && !(layer as any)._popup) {
-        this.map.removeLayer(layer);
+
+    // Limpiar solo las capas temporales de dibujo
+    this.mapLayers.forEach((layer) => {
+      if (layer instanceof L.CircleMarker || layer instanceof L.Polyline) {
+        if (!(layer as any)._popup) {
+          this.map.removeLayer(layer);
+        }
       }
     });
+    this.mapLayers = this.mapLayers.filter((layer) => (layer as any)._popup);
   }
 
   goBack() {
