@@ -17,6 +17,7 @@ import {
   RISK_COORDINATE_CATALOG,
   RiskEvidence,
   EVIDENCE_TYPE_CATALOG,
+  CoordinatePoint,
 } from '../../interfaces/risk.models';
 
 interface RiskResponse {
@@ -672,7 +673,7 @@ type VoiceStep = 'idle' | 'listening' | 'processing' | 'result' | 'evidences';
   ],
 })
 export class RiskFormComponent implements OnInit, OnDestroy {
-  @ViewChild('fileInput') fileInput!: ElementRef<HTMLInputElement>; // <-- AGREGAR ESTA LÍNEA
+  @ViewChild('fileInput') fileInput!: ElementRef<HTMLInputElement>;
 
   isOnline = true;
   isSubmitting = false;
@@ -685,7 +686,7 @@ export class RiskFormComponent implements OnInit, OnDestroy {
 
   transcript = '';
   capturedAudioBase64 = '';
-  iaResult: RiskResponse | null = null; // <-- AGREGAR
+  iaResult: RiskResponse | null = null;
 
   coordinates: { lat: number; lng: number } | null = null;
   address = '';
@@ -694,6 +695,9 @@ export class RiskFormComponent implements OnInit, OnDestroy {
 
   currentEvidences: RiskEvidence[] = [];
   currentAcceptType = '*/*';
+
+  prefillPolygon: CoordinatePoint[] = [];
+  prefillCoordinateType: 'POINT' | 'POLYGON' = 'POINT';
 
   private recognition: any;
   private connectivityInterval: any;
@@ -705,7 +709,7 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     private storageService: StorageService,
     private geoService: GeolocationService,
     private notificationService: NotificationService,
-    private audioService: AudioCaptureService, // 🆕 Nuevo servicio
+    private audioService: AudioCaptureService,
   ) {}
 
   async ngOnInit() {
@@ -716,6 +720,11 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     this.navSubscription = this.navService.prefillData$.subscribe(async (data) => {
       if (data?.coords) {
         this.coordinates = data.coords;
+
+        // Capturar polígono y tipo de coordenada si vienen del mapa
+        this.prefillPolygon = data.polygon || [];
+        this.prefillCoordinateType = data.coordinateType || 'POINT';
+
         const geoData = await this.geoService.getAddressFromCoords(
           data.coords.lat,
           data.coords.lng,
@@ -817,7 +826,7 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     } catch (error) {
       this.notificationService.error('❌ Error', 'No se pudo procesar el archivo.');
     }
-    input.value = ''; // Limpiar para permitir seleccionar el mismo archivo de nuevo
+    input.value = '';
   }
 
   private fileToBase64(file: File): Promise<string> {
@@ -838,7 +847,7 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     return type ? type.icon : '📄';
   }
 
-  // 🆕 REEMPLAZA submitVoiceReport y submitManualReport por este único método unificado:
+  // submitVoiceReport y submitManualReport por este único método unificado:
   async finalizeAndSave() {
     this.isSubmitting = true;
     try {
@@ -927,9 +936,7 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     this.voiceStep = 'listening';
 
     try {
-      // 1. Iniciar grabación de audio real (para IndexedDB)
       await this.audioService.startRecording();
-      // 2. Iniciar reconocimiento de texto (para la UI)
       if (this.recognition) this.recognition.start();
     } catch (e) {
       this.errorMessage = 'No se pudo acceder al micrófono.';
@@ -941,19 +948,6 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     if (this.recognition) this.recognition.stop();
 
     try {
-      console.log('🎙️ [IA] Deteniendo grabación y procesando audio...');
-      this.capturedAudioBase64 = await this.audioService.stopRecording();
-
-      // 🆕 LOG CLAVE PARA VALIDAR EL AUDIO
-      console.log(
-        '✅ [IA] Audio capturado exitosamente. Longitud del Base64:',
-        this.capturedAudioBase64.length,
-      );
-      console.log(
-        '🔍 [IA] Muestra del Base64 (primeros 50 chars):',
-        this.capturedAudioBase64.substring(0, 50) + '...',
-      );
-
       this.voiceStep = 'processing';
 
       setTimeout(() => {
@@ -994,10 +988,15 @@ export class RiskFormComponent implements OnInit, OnDestroy {
   }) {
     const rawRiskType = data.backendResponse?.risk_type || this.formData.risk_type;
     const rawRiskLevel = data.backendResponse?.risk_level || this.formData.risk_level;
-
-    const riskTypeKey = this.getRiskTypeKey(rawRiskType);
-    const riskLevelKey = this.getRiskLevelKey(rawRiskLevel);
     const coords = this.coordinates || { lat: 0, lng: 0 };
+
+    const isPolygon = this.prefillCoordinateType === 'POLYGON' && this.prefillPolygon.length >= 3;
+    const coordinatesToSave = isPolygon
+      ? this.prefillPolygon
+      : [{ latitude: coords.lat, longitude: coords.lng }];
+    const coordinateId = isPolygon
+      ? RISK_COORDINATE_CATALOG.POLYGON.id
+      : RISK_COORDINATE_CATALOG.POINT.id;
 
     const newReport: RiskReport = {
       id: crypto.randomUUID(),
@@ -1007,13 +1006,15 @@ export class RiskFormComponent implements OnInit, OnDestroy {
       risk_type_reporter_id: data.isIA
         ? RISK_REPORTER_CATALOG.ASSISTANT.id
         : RISK_REPORTER_CATALOG.FORM.id,
-      risk_type_coordinate_id: RISK_COORDINATE_CATALOG.POINT.id,
+      risk_type_coordinate_id: coordinateId,
+
       title: data.backendResponse?.title || this.formData.title || 'Reporte de Riesgo',
       description:
         data.backendResponse?.description || this.formData.description || data.transcript,
       latitude: coords.lat,
       longitude: coords.lng,
-      jsonCoordinate: [{ latitude: coords.lat, longitude: coords.lng }],
+      jsonCoordinate: coordinatesToSave,
+
       direccion: this.address || 'Dirección no disponible',
       user_name: 'Técnico Demo',
       report_date: new Date().toISOString(),

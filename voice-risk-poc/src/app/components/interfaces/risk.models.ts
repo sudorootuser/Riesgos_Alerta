@@ -85,8 +85,8 @@ export interface RiskReport {
   direccion: string;
   audio_url?: string;
 
-  user_name: string; // <-- Nota: es user_name, NO user
-  report_date: string; // <-- Nota: es report_date, NO date
+  user_name: string;
+  report_date: string;
   evidences: RiskEvidence[];
 
   created_at: string;

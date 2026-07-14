@@ -833,13 +833,11 @@ export class RiskMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   finishPolygon() {
     if (this.drawingState.tempPoints.length >= 3) {
-      // Guardar todos los puntos del polígono
       this.capturedLocation = {
         lat: this.drawingState.tempPoints[0].latitude,
         lng: this.drawingState.tempPoints[0].longitude,
       };
 
-      // Navegar al formulario con todos los puntos
       this.navService.navigateTo('form', {
         coords: this.capturedLocation,
         polygon: this.drawingState.tempPoints,
@@ -863,7 +861,6 @@ export class RiskMapComponent implements OnInit, AfterViewInit, OnDestroy {
     this.isDrawing = false;
     this.drawingState = { mode: null, tempPoints: [] };
 
-    // Limpiar solo las capas temporales de dibujo
     this.mapLayers.forEach((layer) => {
       if (layer instanceof L.CircleMarker || layer instanceof L.Polyline) {
         if (!(layer as any)._popup) {
