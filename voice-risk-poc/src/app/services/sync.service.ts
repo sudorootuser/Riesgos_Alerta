@@ -22,7 +22,6 @@ export class SyncService {
     if (pending.length === 0) return;
 
     this.isSyncing = true;
-    console.log(`🔄 Iniciando sincronización automática de ${pending.length} reporte(s)...`);
 
     for (const report of pending) {
       try {
@@ -35,7 +34,6 @@ export class SyncService {
     }
 
     this.isSyncing = false;
-    console.log('✅ Sincronización automática completada.');
   }
 
   async syncSingleReport(report: RiskReport): Promise<void> {

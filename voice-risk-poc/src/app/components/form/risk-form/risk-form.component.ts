@@ -173,16 +173,18 @@ type VoiceStep = 'idle' | 'listening' | 'processing' | 'result' | 'evidences';
         </div>
 
         <div *ngIf="voiceStep === 'result'" class="voice-state result">
-          <h3>✅ Análisis de IA Completado</h3>
+          <h3>✅ Audio Capturado Exitosamente</h3>
           <div class="transcript-box">
-            <p><strong>Resumen IA:</strong> {{ iaResult?.report_summary || transcript }}</p>
-            <p><strong>Tipo detectado:</strong> {{ iaResult?.risk_type || 'No especificado' }}</p>
-            <p><strong>Nivel detectado:</strong> {{ iaResult?.risk_level || 'No especificado' }}</p>
+            <p><strong>Texto detectado:</strong> {{ transcript || 'Sin texto detectado' }}</p>
+            <p class="text-xs text-blue-600 mt-3 font-semibold">
+              💡 El análisis con IA se realizará automáticamente al finalizar y guardar el reporte
+              junto con tus evidencias.
+            </p>
           </div>
           <div class="voice-actions">
             <button class="btn-cancel" (click)="resetVoice()">❌ Descartar</button>
             <button class="btn-confirm" (click)="goToEvidencesStep()">
-              ➡️ Siguiente: Evidencias
+              ➡️ Siguiente: Añadir Evidencias
             </button>
           </div>
         </div>
@@ -850,12 +852,35 @@ export class RiskFormComponent implements OnInit, OnDestroy {
   // submitVoiceReport y submitManualReport por este único método unificado:
   async finalizeAndSave() {
     this.isSubmitting = true;
+
+    // 🆕 Mostrar alerta de carga (el botón ya está deshabilitado por [disabled]="isSubmitting")
+    this.notificationService.loading(
+      'Procesando Reporte',
+      this.mode === 'voice'
+        ? 'Analizando con IA y guardando evidencias...'
+        : 'Guardando reporte y evidencias...',
+    );
+
     try {
       const isIA = this.mode === 'voice';
-      let backendResponse = isIA ? this.iaResult : null;
+      let backendResponse = this.iaResult;
 
+      //  Si es modo voz y aún no tenemos la respuesta de la IA, la llamamos AHORA al final del proceso
+      if (isIA && !backendResponse && this.isOnline) {
+        const payload = {
+          message: { text: this.transcript, type: 'text' },
+        };
+        const url =
+          'https://min-ai-dev-dev-n8n-main.happypebble-84155d3f.eastus2.azurecontainerapps.io/webhook/risk-ai';
+        const headers = new HttpHeaders({
+          Authentication: 'Bearer sdjlfadjlñkvajlñdaljkññadljk',
+          'Content-Type': 'application/json',
+        });
+
+        backendResponse = await firstValueFrom(this.http.post<any>(url, payload, { headers }))
+      }
       // Si es manual y hay internet, obtenemos la respuesta de la IA ahora
-      if (!isIA && this.isOnline) {
+      else if (!isIA && this.isOnline) {
         const payload = {
           message: { text: this.formData.description, type: 'text' },
           risk_type: this.formData.risk_type,
@@ -870,6 +895,7 @@ export class RiskFormComponent implements OnInit, OnDestroy {
         backendResponse = await firstValueFrom(this.http.post<any>(url, payload, { headers }));
       }
 
+      // 🆕 Guardamos TODO junto: la respuesta de la IA + las evidencias (imágenes, videos, PDFs)
       await this.saveReportToStorage({
         isIA,
         transcript: this.transcript,
@@ -879,13 +905,17 @@ export class RiskFormComponent implements OnInit, OnDestroy {
         evidences: this.currentEvidences,
       });
 
+      this.notificationService.close(); // Cierra la alerta de loading
       this.notificationService.success(
         '✅ Reporte Guardado',
-        'El reporte y sus evidencias se guardaron exitosamente.',
+        'El reporte, evidencias y análisis de IA se procesaron exitosamente.',
       );
       this.navService.navigateTo('home');
     } catch (error) {
+      this.notificationService.close(); // Cierra la alerta de loading en caso de error
       console.error('❌ Error finalizando reporte:', error);
+
+      // Guardamos localmente con estado de error o retry_ia para que el SyncService lo intente después
       await this.saveReportToStorage({
         isIA: this.mode === 'voice',
         transcript: this.transcript,
@@ -894,9 +924,10 @@ export class RiskFormComponent implements OnInit, OnDestroy {
         status: this.mode === 'voice' ? 'retry_ia' : 'error',
         evidences: this.currentEvidences,
       });
+
       this.notificationService.error(
-        '❌ Error de Red',
-        'Se guardó localmente para intentar más tarde.',
+        '⚠️ Guardado Local',
+        'No se pudo conectar con la IA. El reporte y las evidencias se guardaron para sincronizar después.',
       );
       this.navService.navigateTo('home');
     } finally {
@@ -948,13 +979,12 @@ export class RiskFormComponent implements OnInit, OnDestroy {
     if (this.recognition) this.recognition.stop();
 
     try {
-      this.voiceStep = 'processing';
+      this.capturedAudioBase64 = await this.audioService.stopRecording();
 
-      setTimeout(() => {
-        this.voiceStep = 'result';
-      }, 1500);
+      // Ya no llamamos a la IA aquí. Solo indicamos que el audio está listo para añadir evidencias.
+      this.voiceStep = 'result';
     } catch (e) {
-      console.error('❌ [IA] Error al procesar el audio:', e);
+      console.error('❌ [Voz] Error al detener la grabación:', e);
       this.errorMessage = 'Error al procesar el audio.';
       this.voiceStep = 'idle';
     }
