@@ -51,7 +51,7 @@ export class SyncService {
     const url =
       'https://min-ai-dev-dev-n8n-main.happypebble-84155d3f.eastus2.azurecontainerapps.io/webhook/risk-ai';
     const headers = new HttpHeaders({
-      Authentication: 'Bearer apsd8jfa8p98rj3p239jklds',
+      Authentication: 'Bearer T63vfPHWihNDT8tTrCkCpGInUC489KOzIAgom8nzz7Q',
       'Content-Type': 'application/json',
     });
 
